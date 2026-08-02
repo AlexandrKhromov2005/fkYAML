@@ -22,7 +22,6 @@
 #include <fkYAML/detail/meta/node_traits.hpp>
 #include <fkYAML/detail/meta/stl_supplement.hpp>
 #include <fkYAML/detail/node_attrs.hpp>
-#include <fkYAML/detail/node_property.hpp>
 #include <fkYAML/detail/types/lexical_token_t.hpp>
 #include <fkYAML/exception.hpp>
 
@@ -960,7 +959,7 @@ private:
 
                 basic_node_type node {};
                 node.m_attrs.set(detail::node_attr_bits::alias_bit);
-                node.m_prop.anchor = std::move(token_str);
+                node.mp_anchor = std::make_unique<std::string>(std::move(token_str));
                 node.m_attrs.set_anchor_offset(anchor_counts - 1);
 
                 apply_directive_set(node);
