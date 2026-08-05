@@ -957,8 +957,9 @@ private:
                 }
 
                 basic_node_type node {};
+                node.m_attrs.clear(detail::node_attr_mask::value);
                 node.m_attrs.set(detail::node_attr_bits::alias_bit);
-                node.mp_anchor = std::make_unique<std::string>(std::move(token_str));
+                node.m_value.p_anchor = create_object<std::string>(std::move(token_str));
                 node.m_attrs.set_anchor_offset(anchor_counts - 1);
 
                 apply_directive_set(node);

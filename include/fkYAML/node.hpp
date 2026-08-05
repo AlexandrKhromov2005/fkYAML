@@ -218,6 +218,10 @@ private:
                 detail::destroy_object<string_type>(p_str);
                 p_str = nullptr;
                 break;
+            case detail::node_attr_bits::anchor_bit:
+            case detail::node_attr_bits::alias_bit:
+                detail::destroy_object<std::string>(p_anchor);
+                p_anchor = nullptr;
             default:
                 break;
             }
@@ -235,6 +239,8 @@ private:
         float_number_type float_val;
         /// A pointer to the value of string type.
         string_type* p_str;
+        /// A pointer to the anchor name.
+        std::string* p_anchor;
     };
 
 public:
@@ -261,34 +267,35 @@ public:
     basic_node(const basic_node& rhs)
         : m_attrs(rhs.m_attrs),
           mp_meta(rhs.mp_meta),
-          mp_anchor(rhs.mp_anchor ? std::make_unique<std::string>(*rhs.mp_anchor) : nullptr),
           mp_tag(rhs.mp_tag ? std::make_unique<std::string>(*rhs.mp_tag) : nullptr) {
-        if FK_YAML_LIKELY (!has_anchor_name()) {
-            switch (m_attrs.value().get()) {
-            case detail::node_attr_bits::seq_bit:
-                m_value.p_seq = detail::create_object<sequence_type>(*(rhs.m_value.p_seq));
-                break;
-            case detail::node_attr_bits::map_bit:
-                m_value.p_map = detail::create_object<mapping_type>(*(rhs.m_value.p_map));
-                break;
-            case detail::node_attr_bits::null_bit:
-                m_value.p_map = nullptr;
-                break;
-            case detail::node_attr_bits::bool_bit:
-                m_value.boolean = rhs.m_value.boolean;
-                break;
-            case detail::node_attr_bits::int_bit:
-                m_value.integer = rhs.m_value.integer;
-                break;
-            case detail::node_attr_bits::float_bit:
-                m_value.float_val = rhs.m_value.float_val;
-                break;
-            case detail::node_attr_bits::string_bit:
-                m_value.p_str = detail::create_object<string_type>(*(rhs.m_value.p_str));
-                break;
-            default:                   // LCOV_EXCL_LINE
-                detail::unreachable(); // LCOV_EXCL_LINE
-            }
+        switch (m_attrs.value().get()) {
+        case detail::node_attr_bits::seq_bit:
+            m_value.p_seq = detail::create_object<sequence_type>(*(rhs.m_value.p_seq));
+            break;
+        case detail::node_attr_bits::map_bit:
+            m_value.p_map = detail::create_object<mapping_type>(*(rhs.m_value.p_map));
+            break;
+        case detail::node_attr_bits::null_bit:
+            m_value.p_map = nullptr;
+            break;
+        case detail::node_attr_bits::bool_bit:
+            m_value.boolean = rhs.m_value.boolean;
+            break;
+        case detail::node_attr_bits::int_bit:
+            m_value.integer = rhs.m_value.integer;
+            break;
+        case detail::node_attr_bits::float_bit:
+            m_value.float_val = rhs.m_value.float_val;
+            break;
+        case detail::node_attr_bits::string_bit:
+            m_value.p_str = detail::create_object<string_type>(*(rhs.m_value.p_str));
+            break;
+        case detail::node_attr_bits::anchor_bit:
+        case detail::node_attr_bits::alias_bit:
+            m_value.p_anchor = detail::create_object<std::string>(*(rhs.m_value.p_anchor));
+            break;
+        default:                   // LCOV_EXCL_LINE
+            detail::unreachable(); // LCOV_EXCL_LINE
         }
     }
 
@@ -298,44 +305,47 @@ public:
     basic_node(basic_node&& rhs) noexcept
         : m_attrs(rhs.m_attrs),
           mp_meta(std::move(rhs.mp_meta)),
-          mp_anchor(std::move(rhs.mp_anchor)),
           mp_tag(std::move(rhs.mp_tag)) {
-        if FK_YAML_LIKELY (!has_anchor_name()) {
-            switch (m_attrs.value().get()) {
-            case detail::node_attr_bits::seq_bit:
-                FK_YAML_ASSERT(rhs.m_value.p_seq != nullptr);
-                m_value.p_seq = rhs.m_value.p_seq;
-                rhs.m_value.p_seq = nullptr;
-                break;
-            case detail::node_attr_bits::map_bit:
-                FK_YAML_ASSERT(rhs.m_value.p_map != nullptr);
-                m_value.p_map = rhs.m_value.p_map;
-                rhs.m_value.p_map = nullptr;
-                break;
-            case detail::node_attr_bits::null_bit:
-                FK_YAML_ASSERT(rhs.m_value.p_map == nullptr);
-                m_value.p_map = rhs.m_value.p_map;
-                break;
-            case detail::node_attr_bits::bool_bit:
-                m_value.boolean = rhs.m_value.boolean;
-                rhs.m_value.boolean = static_cast<boolean_type>(false);
-                break;
-            case detail::node_attr_bits::int_bit:
-                m_value.integer = rhs.m_value.integer;
-                rhs.m_value.integer = static_cast<integer_type>(0);
-                break;
-            case detail::node_attr_bits::float_bit:
-                m_value.float_val = rhs.m_value.float_val;
-                rhs.m_value.float_val = static_cast<float_number_type>(0.0);
-                break;
-            case detail::node_attr_bits::string_bit:
-                FK_YAML_ASSERT(rhs.m_value.p_str != nullptr);
-                m_value.p_str = rhs.m_value.p_str;
-                rhs.m_value.p_str = nullptr;
-                break;
-            default:                   // LCOV_EXCL_LINE
-                detail::unreachable(); // LCOV_EXCL_LINE
-            }
+        switch (m_attrs.value().get()) {
+        case detail::node_attr_bits::seq_bit:
+            FK_YAML_ASSERT(rhs.m_value.p_seq != nullptr);
+            m_value.p_seq = rhs.m_value.p_seq;
+            rhs.m_value.p_seq = nullptr;
+            break;
+        case detail::node_attr_bits::map_bit:
+            FK_YAML_ASSERT(rhs.m_value.p_map != nullptr);
+            m_value.p_map = rhs.m_value.p_map;
+            rhs.m_value.p_map = nullptr;
+            break;
+        case detail::node_attr_bits::null_bit:
+            FK_YAML_ASSERT(rhs.m_value.p_map == nullptr);
+            m_value.p_map = rhs.m_value.p_map;
+            break;
+        case detail::node_attr_bits::bool_bit:
+            m_value.boolean = rhs.m_value.boolean;
+            rhs.m_value.boolean = static_cast<boolean_type>(false);
+            break;
+        case detail::node_attr_bits::int_bit:
+            m_value.integer = rhs.m_value.integer;
+            rhs.m_value.integer = static_cast<integer_type>(0);
+            break;
+        case detail::node_attr_bits::float_bit:
+            m_value.float_val = rhs.m_value.float_val;
+            rhs.m_value.float_val = static_cast<float_number_type>(0.0);
+            break;
+        case detail::node_attr_bits::string_bit:
+            FK_YAML_ASSERT(rhs.m_value.p_str != nullptr);
+            m_value.p_str = rhs.m_value.p_str;
+            rhs.m_value.p_str = nullptr;
+            break;
+        case detail::node_attr_bits::anchor_bit:
+        case detail::node_attr_bits::alias_bit:
+            FK_YAML_ASSERT(rhs.m_value.p_anchor != nullptr);
+            m_value.p_anchor = rhs.m_value.p_anchor;
+            rhs.m_value.p_anchor = nullptr;
+            break;
+        default:                   // LCOV_EXCL_LINE
+            detail::unreachable(); // LCOV_EXCL_LINE
         }
 
         rhs.m_attrs = detail::node_attrs {};
@@ -419,17 +429,15 @@ public:
     {
         if (m_attrs.has_any(detail::node_attr_bits::anchoring_bits)) {
             if (m_attrs.is_anchor()) {
-                auto itr = mp_meta->anchor_table.equal_range(*mp_anchor).first;
+                auto itr = mp_meta->anchor_table.equal_range(*m_value.p_anchor).first;
                 std::advance(itr, m_attrs.get_anchor_offset());
                 itr->second.m_value.destroy(itr->second.m_attrs.value().get());
                 itr->second.m_attrs = detail::node_attrs {};
                 itr->second.mp_meta.reset();
             }
         }
-        else if (!m_attrs.is_null()) {
-            m_value.destroy(m_attrs.value().get());
-        }
 
+        m_value.destroy(m_attrs.value().get());
         m_attrs = detail::node_attrs {};
         mp_meta.reset();
     }
@@ -575,6 +583,7 @@ public:
         basic_node node = anchor_node;
         node.m_attrs.clear(detail::node_attr_bits::anchoring_bits);
         node.m_attrs.set(detail::node_attr_bits::alias_bit);
+        node.m_value.p_anchor = detail::create_object<std::string>(anchor_node.get_anchor_name());
         return node;
     } // LCOV_EXCL_LINE
 
@@ -1199,7 +1208,7 @@ public:
     /// @return true if ths basic_node has an anchor name, false otherwise.
     /// @sa https://fktn-k.github.io/fkYAML/api/basic_node/has_anchor_name/
     bool has_anchor_name() const noexcept {
-        return m_attrs.has_any(detail::node_attr_bits::anchoring_bits) && !mp_anchor->empty();
+        return m_attrs.has_any(detail::node_attr_bits::anchoring_bits) && !(m_value.p_anchor->empty());
     }
 
     /// @brief Get the anchor name associated with this basic_node object.
@@ -1211,7 +1220,7 @@ public:
         if FK_YAML_UNLIKELY (!has_anchor_name()) {
             throw fkyaml::exception("No anchor name has been set.");
         }
-        return *mp_anchor;
+        return *m_value.p_anchor;
     }
 
     /// @brief Add an anchor name to this basic_node object.
@@ -1220,15 +1229,15 @@ public:
     /// @sa https://fktn-k.github.io/fkYAML/api/basic_node/add_anchor_name/
     void add_anchor_name(const std::string& anchor_name) {
         if (is_anchor()) {
-            if (anchor_name == *mp_anchor) {
+            if (anchor_name == *m_value.p_anchor) {
                 // No need to do anything if the anchor name is the same as the current one.
                 return;
             }
 
             m_attrs.clear(detail::node_attr_bits::anchoring_bits);
-            auto itr = mp_meta->anchor_table.equal_range(*mp_anchor).first;
+            auto itr = mp_meta->anchor_table.equal_range(*m_value.p_anchor).first;
             std::advance(itr, m_attrs.get_anchor_offset());
-            mp_anchor.reset();
+            detail::destroy_object<std::string>(m_value.p_anchor);
             mp_tag.reset();
             mp_meta.reset();
             itr->second.swap(*this);
@@ -1244,11 +1253,11 @@ public:
         const auto offset = static_cast<uint32_t>(mp_meta->anchor_table.count(anchor_name));
         p_meta->anchor_table.emplace(anchor_name, std::move(node));
 
-        m_attrs.clear(detail::node_attr_bits::anchoring_bits);
+        m_attrs.clear(detail::node_attr_mask::value);
         m_attrs.set(detail::node_attr_bits::anchor_bit);
         mp_meta = p_meta;
         m_attrs.set_anchor_offset(offset);
-        mp_anchor = std::make_unique<std::string>(anchor_name);
+        m_value.p_anchor = detail::create_object<std::string>(anchor_name);
     }
 
     /// @brief Add an anchor name to this basic_node object.
@@ -1257,15 +1266,15 @@ public:
     /// @sa https://fktn-k.github.io/fkYAML/api/basic_node/add_anchor_name/
     void add_anchor_name(std::string&& anchor_name) {
         if (is_anchor()) {
-            if (anchor_name == *mp_anchor) {
+            if (anchor_name == *m_value.p_anchor) {
                 // No need to do anything if the anchor name is the same as the current one.
                 return;
             }
 
             m_attrs.clear(detail::node_attr_bits::anchoring_bits);
-            auto itr = mp_meta->anchor_table.equal_range(*mp_anchor).first;
+            auto itr = mp_meta->anchor_table.equal_range(*m_value.p_anchor).first;
             std::advance(itr, m_attrs.get_anchor_offset());
-            mp_anchor.reset();
+            detail::destroy_object<std::string>(m_value.p_anchor);
             mp_tag.reset();
             mp_meta.reset();
             itr->second.swap(*this);
@@ -1281,12 +1290,12 @@ public:
         node.swap(*this);
         p_meta->anchor_table.emplace(anchor_name, std::move(node));
 
-        m_attrs.clear(detail::node_attr_bits::anchoring_bits);
+        m_attrs.clear(detail::node_attr_mask::value);
         m_attrs.set(detail::node_attr_bits::anchor_bit);
         mp_meta = p_meta;
         auto offset = static_cast<uint32_t>(mp_meta->anchor_table.count(anchor_name) - 1);
         m_attrs.set_anchor_offset(offset);
-        mp_anchor = std::make_unique<std::string>(std::move(anchor_name));
+        m_value.p_anchor = detail::create_object<std::string>(std::move(anchor_name));
     }
 
     /// @brief Check whether this basic_node object has already had any tag name.
@@ -1636,7 +1645,6 @@ public:
         std::memcpy(&m_value, &rhs.m_value, sizeof(node_value));
         std::memcpy(&rhs.m_value, &tmp, sizeof(node_value));
 
-        swap(mp_anchor, rhs.mp_anchor);
         swap(mp_tag, rhs.mp_tag);
     }
 
@@ -1831,7 +1839,7 @@ private:
     /// @return Reference to an actual value node.
     basic_node& resolve_reference() {
         if FK_YAML_UNLIKELY (has_anchor_name()) {
-            auto itr = mp_meta->anchor_table.equal_range(*mp_anchor).first;
+            auto itr = mp_meta->anchor_table.equal_range(*m_value.p_anchor).first;
             std::advance(itr, m_attrs.get_anchor_offset());
             return itr->second;
         }
@@ -1842,7 +1850,7 @@ private:
     /// @return Const reference to an actual value node.
     const basic_node& resolve_reference() const {
         if FK_YAML_UNLIKELY (has_anchor_name()) {
-            auto itr = mp_meta->anchor_table.equal_range(*mp_anchor).first;
+            auto itr = mp_meta->anchor_table.equal_range(*m_value.p_anchor).first;
             std::advance(itr, m_attrs.get_anchor_offset());
             return itr->second;
         }
@@ -1991,8 +1999,6 @@ private:
         std::shared_ptr<detail::document_metainfo<basic_node>>(new detail::document_metainfo<basic_node>())};
     /// The current node value.
     node_value m_value {};
-    /// The anchor name of this node.
-    std::unique_ptr<std::string> mp_anchor {};
     /// The tag of this node.
     std::unique_ptr<std::string> mp_tag {};
 };
