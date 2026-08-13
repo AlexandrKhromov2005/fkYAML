@@ -73,11 +73,15 @@ class basic_deserializer {
         /// @param indent The indentation width in the current line. (count from zero)
         /// @param state The parse context type.
         /// @param p_node The underlying node associated to this context.
-        parse_context(uint32_t line, uint32_t indent, context_state_t state, basic_node_type* p_node) noexcept
+        /// @param owns_node Whether this context owns @p p_node and must free it on destruction.
+        parse_context(
+            uint32_t line, uint32_t indent, context_state_t state, basic_node_type* p_node,
+            bool owns_node = false) noexcept
             : line(line),
               indent(indent),
               state(state),
-              p_node(p_node) {
+              p_node(p_node),
+              owns_node(owns_node) {
         }
 
         parse_context(const parse_context&) noexcept = default;
@@ -86,15 +90,12 @@ class basic_deserializer {
         parse_context& operator=(parse_context&&) noexcept = default;
 
         ~parse_context() {
-            switch (state) {
-            case context_state_t::BLOCK_MAPPING_EXPLICIT_KEY:
-            case context_state_t::FLOW_SEQUENCE_KEY:
-            case context_state_t::FLOW_MAPPING_KEY:
+            // Ownership is tracked explicitly rather than inferred from `state`: a heap-allocated key node stays
+            // owned by its context even when a later token rewrites `state` (e.g. a flow collection opened in place
+            // of an explicit key), so freeing based on the mutable state would leak the node.
+            if (owns_node) {
                 delete p_node;
                 p_node = nullptr;
-                break;
-            default:
-                break;
             }
         }
 
@@ -106,6 +107,8 @@ class basic_deserializer {
         context_state_t state {context_state_t::BLOCK_MAPPING};
         /// The pointer to the associated node to this context.
         basic_node_type* p_node {nullptr};
+        /// Whether this context owns @ref p_node (a heap-allocated key node) and must free it on destruction.
+        bool owns_node {false};
     };
 
     /// @brief Definitions of state types for expected flow token hints.
@@ -444,7 +447,8 @@ private:
                 if (token.type == lexical_token_t::SEQUENCE_BLOCK_PREFIX) {
                     // heap-allocated node will be freed in handling the corresponding KEY_SEPARATOR event
                     auto* p_node = new basic_node_type(node_type::SEQUENCE);
-                    m_context_stack.emplace_back(line, indent, context_state_t::BLOCK_MAPPING_EXPLICIT_KEY, p_node);
+                    m_context_stack.emplace_back(
+                        line, indent, context_state_t::BLOCK_MAPPING_EXPLICIT_KEY, p_node, /*owns_node=*/true);
 
                     apply_directive_set(*p_node);
                     parse_context context(
@@ -466,7 +470,8 @@ private:
 
                 // heap-allocated node will be freed in handling the corresponding KEY_SEPARATOR event
                 m_context_stack.emplace_back(
-                    line, indent, context_state_t::BLOCK_MAPPING_EXPLICIT_KEY, new basic_node_type());
+                    line, indent, context_state_t::BLOCK_MAPPING_EXPLICIT_KEY, new basic_node_type(),
+                    /*owns_node=*/true);
                 mp_current_node = m_context_stack.back().p_node;
                 apply_directive_set(*mp_current_node);
                 indent = lexer.get_last_token_begin_pos();
@@ -732,7 +737,8 @@ private:
                 case context_state_t::FLOW_MAPPING:
                     // heap-allocated node will be freed in handling the corresponding SEQUENCE_FLOW_END event.
                     m_context_stack.emplace_back(
-                        line, indent, context_state_t::FLOW_SEQUENCE_KEY, new basic_node_type(node_type::SEQUENCE));
+                        line, indent, context_state_t::FLOW_SEQUENCE_KEY, new basic_node_type(node_type::SEQUENCE),
+                        /*owns_node=*/true);
                     mp_current_node = m_context_stack.back().p_node;
                     break;
                 default: {
@@ -768,8 +774,13 @@ private:
 
                 // keep the last state for later processing.
                 parse_context& last_context = m_context_stack.back();
+                // Take over ownership of the node from the context being popped: when the flow sequence stood in for
+                // an explicit/flow key, `p_node` is a standalone heap node that must still be freed on every exit
+                // path below, not just when the context's destructor runs.
+                const bool owns_node = last_context.owns_node;
                 mp_current_node = last_context.p_node;
                 last_context.p_node = nullptr;
+                last_context.owns_node = false;
                 indent = last_context.indent;
                 const context_state_t state = last_context.state;
                 m_context_stack.pop_back();
@@ -793,11 +804,18 @@ private:
                     mp_current_node->swap(key_node);
 
                     m_context_stack.emplace_back(line, indent, context_state_t::BLOCK_MAPPING, mp_current_node);
+                    // if the sequence was a standalone key node, keep ownership with the new mapping context.
+                    m_context_stack.back().owns_node = owns_node;
                     m_flow_token_state = flow_token_state_t::NEEDS_VALUE_OR_SUFFIX;
 
                     add_new_key(std::move(key_node), line, indent);
                 }
                 else {
+                    if (owns_node) {
+                        // a standalone key node with no mapping to attach to (e.g. a bare `[...]` explicit key).
+                        delete mp_current_node;
+                        mp_current_node = nullptr;
+                    }
                     if (!m_context_stack.empty()) {
                         mp_current_node = m_context_stack.back().p_node;
                     }
@@ -847,7 +865,8 @@ private:
                 case context_state_t::FLOW_MAPPING:
                     // heap-allocated node will be freed in handling the corresponding MAPPING_FLOW_END event.
                     m_context_stack.emplace_back(
-                        line, indent, context_state_t::FLOW_MAPPING_KEY, new basic_node_type(node_type::MAPPING));
+                        line, indent, context_state_t::FLOW_MAPPING_KEY, new basic_node_type(node_type::MAPPING),
+                        /*owns_node=*/true);
                     mp_current_node = m_context_stack.back().p_node;
                     break;
                 default: {
@@ -886,8 +905,13 @@ private:
 
                 // keep the last state for later processing.
                 parse_context& last_context = m_context_stack.back();
+                // Take over ownership of the node from the context being popped (see SEQUENCE_FLOW_END): a flow
+                // mapping standing in for an explicit/flow key holds a standalone heap node that must be freed on
+                // every exit path below.
+                const bool owns_node = last_context.owns_node;
                 mp_current_node = last_context.p_node;
                 last_context.p_node = nullptr;
+                last_context.owns_node = false;
                 indent = last_context.indent;
                 const context_state_t state = last_context.state;
                 m_context_stack.pop_back();
@@ -911,11 +935,18 @@ private:
                     mp_current_node->swap(key_node);
 
                     m_context_stack.emplace_back(line, indent, context_state_t::BLOCK_MAPPING, mp_current_node);
+                    // if the mapping was a standalone key node, keep ownership with the new mapping context.
+                    m_context_stack.back().owns_node = owns_node;
                     m_flow_token_state = flow_token_state_t::NEEDS_VALUE_OR_SUFFIX;
 
                     add_new_key(std::move(key_node), line, indent);
                 }
                 else {
+                    if (owns_node) {
+                        // a standalone key node with no mapping to attach to (e.g. a bare `{...}` explicit key).
+                        delete mp_current_node;
+                        mp_current_node = nullptr;
+                    }
                     if (!m_context_stack.empty()) {
                         mp_current_node = m_context_stack.back().p_node;
                     }
